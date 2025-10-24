@@ -8,7 +8,7 @@
 - [[#project-setup][Project Setup]]
 - [[#dependencies][Dependencies]]
 - [[#models][Models]]
-  - [[#territory-model][Territory]]
+  - [[#territory_model][Territory]]
 - [[#project][Project]]
   - [[#project-core][Core]]
 
@@ -133,7 +133,7 @@ will be the same as our connection in the core package.
 
 ** Territory
 :PROPERTIES:
-:CUSTOM_ID: territory-model
+:CUSTOM_ID: territory_model
 :END:
 
 Territories will represent the different divisions in the map.
