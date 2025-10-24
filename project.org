@@ -1,0 +1,204 @@
+#+TITLE: My Project
+#+AUTHOR: Ignacio Torres
+#+PROPERTY: header-args :tangle lib.lisp
+#+OPTIONS: toc:nil
+
+* Table of Contents
+- [[#introduction][Introduction]]
+- [[#project-setup][Project Setup]]
+- [[#dependencies][Dependencies]]
+- [[#models][Models]]
+  - [[#territory-model][Territory]]
+- [[#project][Project]]
+  - [[#project-core][Core]]
+
+
+* Introduction
+:PROPERTIES:
+:CUSTOM_ID: introduction
+:END:
+This is the introduction for what im hoping will be a successful literate programming endevour
+
+* Project Setup
+:PROPERTIES:
+:CUSTOM_ID: project-setup
+:END:
+
+Firstly the sbcl dll must be build from source
+
+** Check requirements
+#+BEGIN_SRC shell :tangle no
+  if ! command -v git >/dev/null 2>&1; then
+      echo "❌ Error: git not found."
+      exit 1
+  fi
+
+  if ! command -v gcc >/dev/null 2>&1; then
+      echo "❌ Error: gcc not found."
+      exit 1
+  fi
+#+END_SRC
+
+** Clone repo
+#+BEGIN_SRC shell :tangle no
+  if [ ! -d "sbcl" ]; then
+      echo "📥 Cloning SBCL source..."
+      git clone https://github.com/sbcl/sbcl.git
+  else
+      echo "📁 SBCL directory already exists — skipping clone."
+  fi
+#+END_SRC
+
+** Build sbcl dll
+#+BEGIN_SRC shell :tangle no
+  cd sbcl
+
+  echo "⚙️ Configuring and building SBCL..."
+  ./make-config.sh --fancy
+  ./make.sh --fancy
+  ./make-shared-library.sh --fancy
+
+  echo "✅ SBCL built successfully."
+#+END_SRC
+
+* Dependencies
+:PROPERTIES:
+:CUSTOM_ID: dependencies
+:END:
+- swank: The typical repl's server
+- [[https://github.com/fukamachi/cl-dbi][cl-dbi]]: database interface for sqlite
+- [[https://github.com/fukamachi/sxql][sxql]]: The query builder
+- [[https://github.com/guicho271828/trivia][trivia]]: pattern matching library
+
+Dependency loading
+#+BEGIN_SRC lisp
+  (ql:quickload '(:cl-dbi
+                  :sxql
+                  :swank
+                  :trivia))
+#+END_SRC
+
+* Models
+:PROPERTIES:
+:CUSTOM_ID: models
+:END:
+For the models we'll keep them in a separate package just for convenience's sake
+
+#+BEGIN_SRC lisp
+  (defpackage :lib.models
+    (:use :cl :sxql))
+  (in-package :lib.models)
+#+END_SRC
+
+We will use the following macro to facilitate
+- create an sxql table definition
+- define a function to create the table when given a connection
+
+Macro definition
+#+BEGIN_SRC lisp
+  (defmacro deftable (name columns &rest options)
+    "Define a function MAKE-<NAME>-TABLE that created the table when called with a connection"
+    (let* ((table-keyword (intern (symbol-name name) :keyboard))
+           (function-name (intern (format nil "MAKE-~A-TABLE" (symbol-name name)))))
+      `(defun ,function-name (connection)
+         (let ((table-definition
+                 (create-table (,table-keyword :if-not-exists t)
+                     ,columns
+                   ,@options)))
+           (dbi:do-sql connection (yield table-definition))))))
+#+END_SRC
+
+The format for the columns is the same as the one used in [[https://github.com/fukamachi/sxql][sxql]]
+For example, the following definition for a table called `example`
+
+#+BEGIN_SRC lisp :tangle no
+  (deftable example ((id :type 'uuid :primary-key t :unique t)
+                       (name :type 'string)
+                       (example_foreign_key :type 'uuid))
+    (foreign-key :example_foreign_key :references '(:example :id)))
+#+END_SRC
+
+Will macroexpand to something like the following, where the connection argument
+will be the same as our connection in the core package.
+
+#+BEGIN_SRC lisp :tangle no
+(DEFUN MAKE-EXAMPLE-TABLE (CONNECTION)
+  (LET ((TABLE-DEFINITION
+         (CREATE-TABLE (:EXAMPLE :IF-NOT-EXISTS T)
+             ((ID :TYPE 'UUID :PRIMARY-KEY T :UNIQUE T) (NAME :TYPE 'STRING)
+              (EXAMPLE_FOREIGN_KEY :TYPE 'UUID))
+           (FOREIGN-KEY :EXAMPLE_FOREIGN_KEY :REFERENCES '(:EXAMPLE :ID)))))
+    (DBI.DRIVER:DO-SQL CONNECTION (YIELD TABLE-DEFINITION))))
+#+END_SRC
+
+** Territory
+:PROPERTIES:
+:CUSTOM_ID: territory-model
+:END:
+
+Territories will represent the different divisions in the map.
+
+Territory size should be one of:
+- xlarge: Empire, etc
+- large: Kingdom, Country
+- medium: Dukedom
+- small: County
+- xsmall: Town, Fortification, etc
+
+Table declaration
+#+BEGIN_SRC lisp
+  (deftable territory ((id :type 'uuid :primary-key t :unique t)
+                       (name :type 'string)
+                       (size :type 'string)
+                       (parent_id :type 'uuid))
+    (foreign-key :parent_id :references '(:territory :id)))
+#+END_SRC
+
+* Project
+:PROPERTIES:
+:CUSTOM_ID: project
+:END:
+
+First we are establishing the main package for easy access to sxql and sb-alien for bindings
+
+** Project core
+:PROPERTIES:
+:CUSTOM_ID: project-core
+:END:
+
+#+BEGIN_SRC lisp
+  (defpackage :lib.core
+    (:use :cl :sb-alien :sxql)
+    (:export :start-repl-binding :step-simulation-binding))
+  (in-package :lib.core)
+#+END_SRC
+
+With that, we should now create a database connection. We'll use defvar rather than defparameter so it doesn't leave
+dangling connections if we were to re-eval the package.
+The connection is created as `nil` and the connection established in a function so that it's easier to reset
+or create one with a different name;
+
+#+BEGIN_SRC lisp
+  (defvar *connection* nil)
+
+  (defun establish-connection (db-name)
+    (unless *connection*
+      (dbi:connect :sqlite3 :database-name db-name)))
+#+END_SRC
+
+We will also need a function to handle reseting the simulation.
+We should do
+- If the connection is not nil, disconnect
+- Set the variable to nil so that the db file is not locked
+- Delete the db file
+- Re-establish the connection
+
+--
+#+BEGIN_SRC lisp
+  (defun restart-connection (db-name)
+    (when *connection*
+      (dbi:disconnect *connection*)
+      (setf *connection* nil))
+    (uiop:delete-file-if-exists db-name)
+    (setf *connection* (establish-connection db-name)))
+#+END_SRC
