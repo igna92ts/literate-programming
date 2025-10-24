@@ -1,4 +1,4 @@
-#+TITLE: My Project
+#+TITLE: Super Magic Simulation
 #+AUTHOR: Ignacio Torres
 #+PROPERTY: header-args :tangle lib.lisp
 #+OPTIONS: toc:nil
@@ -24,7 +24,7 @@ This is the introduction for what im hoping will be a successful literate progra
 :CUSTOM_ID: project-setup
 :END:
 
-Firstly the sbcl dll must be build from source
+Firstly the sbcl dll must be built from source
 
 ** Check requirements
 #+BEGIN_SRC shell :tangle no
@@ -108,7 +108,7 @@ Macro definition
            (dbi:do-sql connection (yield table-definition))))))
 #+END_SRC
 
-The format for the columns is the same as the one used in [[https://github.com/fukamachi/sxql][sxql]]
+The format for the columns is the same as the one used in [[https://github.com/fukamachi/sxql][sxql]].
 For example, the following definition for a table called `example`
 
 #+BEGIN_SRC lisp :tangle no
@@ -176,7 +176,7 @@ First we are establishing the main package for easy access to sxql and sb-alien 
 With that, we should now create a database connection. We'll use defvar rather than defparameter so it doesn't leave
 dangling connections if we were to re-eval the package.
 The connection is created as `nil` and the connection established in a function so that it's easier to reset
-or create one with a different name;
+or create one with a different name.
 
 #+BEGIN_SRC lisp
   (defvar *connection* nil)
